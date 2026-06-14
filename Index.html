@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Random Link Generator</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#151922; --accent:#6ee7ff; --text:#e8eef8; --muted:#9aa4ad; --danger:#ff6b6b;
+  }
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Inter,Arial;background:linear-gradient(180deg,#0b0d12,#121725);}
+  .wrap{max-width:920px;margin:32px auto;padding:0 16px;color:var(--text);}
+  h1{font-size:24px;margin:0 0 12px;color:var(--accent);letter-spacing:.3px}
+  p{color:var(--muted);margin:.2rem 0 1rem}
+  .grid{display:grid;grid-template-columns:1fr 340px;gap:16px}
+  .card{background:var(--panel);border-radius:14px;padding:14px;box-shadow:0 10px 24px rgba(0,0,0,.35)}
+  textarea{width:100%;min-height:240px;background:#0e1220;color:var(--text);border:1px solid #1e2536;border-radius:10px;padding:12px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .btn{background:#1e2636;border:1px solid #2a344a;color:#cfe6ff;border-radius:10px;padding:10px 14px;cursor:pointer}
+  .btn:hover{filter:brightness(1.1)}
+  .btn.primary{background:#0b3650;border-color:#0e4c6d;color:#d9f7ff}
+  .btn.danger{background:#43202a;border-color:#6b2a3a;color:#ffd9df}
+  .switch{display:flex;align-items:center;gap:8px;margin-top:8px}
+  input[type="checkbox"]{width:18px;height:18px}
+  .output{font-size:16px;word-break:break-all;background:#0e1220;border:1px dashed #2a344a;border-radius:10px;padding:12px}
+  .pill{display:inline-flex;align-items:center;border:1px solid #2a344a;border-radius:999px;padding:6px 10px;margin:4px 6px 0 0;font-size:12px;color:#b7c3d6}
+  .list{max-height:200px;overflow:auto;margin-top:8px}
+  a.pick{display:inline-block;margin-top:8px}
+  .small{font-size:12px;color:#96a1b4}
+  .hint{font-family:ui-monospace,monospace;font-size:12px;color:#b6c0d4;margin:.5rem 0}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Random Link Generator</h1>
+    <p>Paste links below (one per line). You can use <span class="hint">Label | https://example.com</span>. Lines starting with <span class="hint">#</span> are ignored.</p>
+    <div class="grid">
+      <div class="card">
+        <textarea id="linkInput" placeholder="Examples:
+Cats | https://en.wikipedia.org/wiki/Cat
+Dogs | wikipedia.org/wiki/Dog
+https://example.com
+# this is a comment line"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="btnSample">Insert sample</button>
+          <button class="btn danger" id="btnClear">Clear</button>
+          <button class="btn" id="btnShuffle">Shuffle list</button>
+          <span class="small" id="countLabel"></span>
+        </div>
+        <div class="switch">
+          <input type="checkbox" id="noRepeat" checked>
+          <label for="noRepeat">No repeats until all links have been used</label>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="btnPick">Pick random link</button>
+          <button class="btn" id="btnCopy">Copy current link</button>
+          <button class="btn" id="btnResetUsed">Reset ‘used’</button>
+        </div>
+        <div class="output" id="currentOutput">No pick yet.</div>
+        <div id="currentAnchor"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;margin-bottom:6px">
+          <strong>History</strong>
+          <button class="btn danger" id="btnClearHistory">Clear history</button>
+        </div>
+        <div class="list" id="history"></div>
+        <div class="pill" id="stats">Used 0 / 0</div>
+        <p class="small" style="margin-top:8px">Tip: If a line is missing <span class="hint">http://</span> or <span class="hint">https://</span>, we’ll assume <span class="hint">https://</span>.</p>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const ta = document.getElementById('linkInput');
+  const noRepeat = document.getElementById('noRepeat');
+  const out = document.getElementById('currentOutput');
+  const anchorWrap = document.getElementById('currentAnchor');
+  const historyEl = document.getElementById('history');
+  const statsEl = document.getElementById('stats');
+  const countLabel = document.getElementById('countLabel');
+  const state = { pool: [], used: new Set(), history: [] };
+
+  // Helpers
+  const normalizeUrl = (u) => {
+    u = u.trim();
+    if (!u) return "";
+    // If line is "Label | url"
+    if (u.includes('|')) {
+      const [labelPart, urlPart] = u.split('|');
+      return { label: labelPart.trim(), url: fixScheme(urlPart.trim()) };
+    }
+    return { label: null, url: fixScheme(u) };
+  };
+  const fixScheme = (url) => {
+    if (!/^https?:\/\//i.test(url)) return 'https://' + url;
+    return url;
+  };
+  const parseLines = () => {
+    const lines = ta.value.split('\n')
+      .map(s => s.trim())
+      .filter(s => s && !s.startsWith('#'));
+    const items = [];
+    for (const line of lines) {
+      const obj = normalizeUrl(line);
+      try {
+        // Validate URL
+        new URL(obj.url);
+        items.push(obj);
+      } catch (e) {
+        // skip invalid
+      }
+    }
+    state.pool = items;
+    countLabel.textContent = `(${items.length} valid link${items.length===1?'':'s'})`;
+    updateStats();
+  };
+  const pickIndex = () => {
+    const n = state.pool.length;
+    if (n === 0) return -1;
+    if (noRepeat.checked) {
+      if (state.used.size >= n) {
+        // Reset used set automatically after exhausting all
+        state.used.clear();
+      }
+      // Build available indices
+      const available = [];
+      for (let i=0;i<n;i++) if (!state.used.has(i)) available.push(i);
+      const idx = available[Math.floor(Math.random()*available.length)];
+      state.used.add(idx);
+      return idx;
+    } else {
+      return Math.floor(Math.random()*n);
+    }
+  };
+  const renderPick = (item) => {
+    if (!item) {
+      out.textContent = 'No valid links. Add some above.';
+      anchorWrap.innerHTML = '';
+      return;
+    }
+    const label = item.label ? item.label : item.url;
+    out.innerHTML = `<strong>Picked:</strong> ${label}`;
+    anchorWrap.innerHTML = `<a class="pick btn primary" href="${item.url}" target="_blank" rel="noopener">Open in new tab</a>`;
+  };
+  const pushHistory = (item) => {
+    const ts = new Date().toLocaleTimeString();
+    state.history.unshift({ ...item, ts });
+    // render
+    historyEl.innerHTML = state.history.map(h => `
+      <div class="row" style="justify-content:space-between;border-bottom:1px dashed #2a344a;padding:6px 0">
+        <div>
+          <div><strong>${h.label ? h.label : h.url}</strong></div>
+          <div class="small">${h.url}</div>
+        </div>
+        <div class="small">${h.ts}</div>
+      </div>
+    `).join('');
+  };
+  const updateStats = () => {
+    statsEl.textContent = `Used ${state.used.size} / ${state.pool.length}`;
+  };
+
+  // Events
+  document.getElementById('btnPick').addEventListener('click', () => {
+    parseLines();
+    const idx = pickIndex();
+    if (idx === -1) { renderPick(null); return; }
+    const item = state.pool[idx];
+    renderPick(item);
+    pushHistory(item);
+    updateStats();
+  });
+
+  document.getElementById('btnCopy').addEventListener('click', async () => {
+    const text = anchorWrap.textContent.includes('Open in new tab')
+      ? anchorWrap.querySelector('a').href
+      : out.textContent.replace(/^Picked:\s*/,'').trim();
+    if (!text || text === 'No pick yet.') return;
+    try { await navigator.clipboard.writeText(text); 
+      out.innerHTML += ' <span class="small">— copied!</span>'; 
+    } catch {}
+  });
+
+  document.getElementById('btnClearHistory').addEventListener('click', () => {
+    state.history = []; historyEl.innerHTML = '';
+  });
+
+  document.getElementById('btnResetUsed').addEventListener('click', () => {
+    state.used.clear(); updateStats();
+  });
+
+  document.getElementById('btnClear').addEventListener('click', () => {
+    ta.value = ''; parseLines(); anchorWrap.innerHTML=''; out.textContent='Cleared.';
+  });
+
+  document.getElementById('btnShuffle').addEventListener('click', () => {
+    parseLines();
+    // Fisher–Yates
+    for (let i = state.pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [state.pool[i], state.pool[j]] = [state.pool[j], state.pool[i]];
+    }
+    ta.value = state.pool.map(o => (o.label ? `${o.label} | ${o.url}` : o.url)).join('\n');
+    state.used.clear(); updateStats();
+  });
+
+  document.getElementById('btnSample').addEventListener('click', () => {
+    ta.value = `Cats | https://en.wikipedia.org/wiki/Cat
+Dogs | wikipedia.org/wiki/Dog
+OpenAI | openai.com
+MDN Web Docs | https://developer.mozilla.org/
+# You can comment lines with a leading #`;
+    parseLines();
+  });
+
+  ta.addEventListener('input', parseLines);
+
+  // Initial
+  parseLines();
+})();
+</script>
+</body>
+</html>
